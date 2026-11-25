@@ -153,4 +153,47 @@ describe('Аудиодвижок', () => {
     engine.dispose()
     new AudioEngine().dispose()
   })
+
+  test('экспортирует один такт с правильными позициями, громкостью, mute и solo', async () => {
+    const engine = new AudioEngine()
+    const offline = new FakeContext()
+    const frames = 88200
+    const data = new Float32Array(frames)
+    const render = jest.fn(async (): Promise<AudioBuffer> => ({
+      numberOfChannels: 2,
+      length: frames,
+      sampleRate: 44100,
+      duration: 2,
+      getChannelData: () => data,
+      copyFromChannel: jest.fn(),
+      copyToChannel: jest.fn(),
+    }))
+    const constructor = jest.fn<(channels: number, frames: number, sampleRate: number) => FakeContext>(() => Object.assign(offline, { startRendering: render }))
+
+    data[0] = -0.5
+    data[1] = 0.5
+    Object.defineProperty(globalThis, 'OfflineAudioContext', { configurable: true, value: constructor })
+    await engine.load(audioFile(), 'kick')
+
+    const track = { ...createTrack('1', 'Kick'), soundId: 'kick', volume: 25, solo: true }
+
+    track.steps[0] = true
+    track.steps[15] = true
+
+    const wav = await engine.exportBar([
+      track,
+      { ...track, id: '2', muted: true },
+      { ...track, id: '3', solo: false },
+    ], 120)
+
+    expect(constructor).toHaveBeenCalledWith(2, frames, 44100)
+    expect(offline.sources).toHaveLength(2)
+    expect(offline.sources[0].start).toHaveBeenCalledWith(0)
+    expect(offline.sources[1].start).toHaveBeenCalledWith(1.875)
+    expect(offline.createGain).toHaveReturnedWith(expect.objectContaining({ gain: { value: 0.125 } }))
+    expect(wav.type).toBe('audio/wav')
+    expect(wav.size).toBe(44 + frames * 4)
+    engine.dispose()
+    Reflect.deleteProperty(globalThis, 'OfflineAudioContext')
+  })
 })

@@ -8,5 +8,5 @@ export default {
     '^@pulse/ui$': '<rootDir>/../ui-library/src/index.ts'
   },
   setupFilesAfterEnv: ['<rootDir>/src/setupTests.ts'],
-  collectCoverageFrom: ['src/App.tsx', 'src/audio.ts', 'src/model.ts']
+  collectCoverageFrom: ['src/**/*.{ts,tsx}', '!src/**/*.test.{ts,tsx}', '!src/main.tsx', '!src/setupTests.ts']
 }

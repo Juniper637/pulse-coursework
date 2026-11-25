@@ -1,4 +1,5 @@
 import { canSound, DEFAULT_SOUNDS, STEP_COUNT, validateFile } from './model'
+import { encodeWav } from './wav'
 
 import type { Track } from '@pulse/ui'
 
@@ -44,14 +45,14 @@ export class AudioEngine {
     this.bpm = bpm
   }
 
-  private async ensureSound(id: string): Promise<void> {
+  private async ensureSound(id: string, decoder?: BaseAudioContext): Promise<void> {
     const sound = DEFAULT_SOUNDS.find((item) => item.id === id)
 
     if (this.buffers.has(id) || !sound) {
       return
     }
 
-    const context = await this.ready()
+    const context = decoder ?? await this.ready()
     const response = await fetch(sound.url)
 
     if (!response.ok) {
@@ -61,6 +62,18 @@ export class AudioEngine {
     this.buffers.set(id, await context.decodeAudioData(await response.arrayBuffer()))
   }
 
+  private connectSample(context: BaseAudioContext, buffer: AudioBuffer, volume: number): { source: AudioBufferSourceNode, gain: GainNode } {
+    const source = context.createBufferSource()
+    const gain = context.createGain()
+
+    source.buffer = buffer
+    gain.gain.value = volume / 100 * 0.5
+    source.connect(gain)
+    gain.connect(context.destination)
+
+    return { source, gain }
+  }
+
   private trigger(id: string, time: number, volume = 80): void {
     const buffer = this.buffers.get(id)
 
@@ -68,13 +81,8 @@ export class AudioEngine {
       return
     }
 
-    const source = this.context.createBufferSource()
-    const gain = this.context.createGain()
+    const { source, gain } = this.connectSample(this.context, buffer, volume)
 
-    source.buffer = buffer
-    gain.gain.value = volume / 100 * 0.5
-    source.connect(gain)
-    gain.connect(this.context.destination)
     this.sources.add(source)
 
     source.onended = (): void => {
@@ -134,6 +142,35 @@ export class AudioEngine {
 
     tick()
     this.timer = setInterval(tick, 25)
+  }
+
+  async exportBar(tracks: readonly Track[], bpm: number): Promise<Blob> {
+    const stepDuration = 60 / bpm / 4
+    const sampleRate = 44100
+    const context = new OfflineAudioContext(2, Math.round(STEP_COUNT * stepDuration * sampleRate), sampleRate)
+
+    for (const track of tracks) {
+      if (!track.soundId || !track.steps.some(Boolean) || track.volume === 0 || !canSound(track, tracks)) {
+        continue
+      }
+
+      await this.ensureSound(track.soundId, context)
+      const buffer = this.buffers.get(track.soundId)
+
+      if (!buffer) {
+        throw new Error('Сэмпл для экспорта недоступен')
+      }
+
+      for (let step = 0; step < STEP_COUNT; step++) {
+        if (track.steps[step]) {
+          const { source } = this.connectSample(context, buffer, track.volume)
+
+          source.start(step * stepDuration)
+        }
+      }
+    }
+
+    return encodeWav(await context.startRendering())
   }
 
   stop(): void {

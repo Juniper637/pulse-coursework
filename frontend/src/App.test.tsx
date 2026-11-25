@@ -4,6 +4,7 @@ import { MemoryRouter } from 'react-router-dom'
 
 import { App } from './App'
 import { AudioEngine } from './audio'
+import { PROJECT_KEY } from './project'
 
 beforeEach(() => {
   jest.spyOn(AudioEngine.prototype, 'load').mockResolvedValue(undefined)
@@ -120,7 +121,7 @@ describe('Приложение', () => {
     fireEvent.change(screen.getByLabelText('Дорожка для назначения'), { target: { value: 'track-1' } })
     fireEvent.click(screen.getByRole('button', { name: 'Hi-hat' }))
     fireEvent.click(screen.getByRole('link', { name: 'Проекты' }))
-    expect(screen.getByRole('heading', { name: 'Сохранённые ритмы' })).toBeVisible()
+    expect(screen.getByRole('heading', { name: 'Сохранённый ритм' })).toBeVisible()
     fireEvent.click(screen.getByRole('button', { name: '■ Стоп' }))
     fireEvent.click(screen.getByRole('link', { name: 'Вернуться в студию' }))
 
@@ -136,5 +137,43 @@ describe('Приложение', () => {
     expect(AudioEngine.prototype.stop).toHaveBeenCalled()
     unmount()
     expect(AudioEngine.prototype.dispose).toHaveBeenCalled()
+  })
+
+  test('сохраняет ритм, восстанавливает его после нового запуска и обрабатывает повреждённые данные', () => {
+    localStorage.clear()
+    const first = renderApp()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Kick: шаг 1' }))
+    fireEvent.change(screen.getByLabelText('Темп BPM'), { target: { value: '138' } })
+    fireEvent.click(screen.getByRole('link', { name: 'Проекты' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Загрузить ритм' }))
+    expect(screen.getByRole('status', { name: 'Состояние приложения' })).toHaveTextContent('пока нет')
+    fireEvent.click(screen.getByRole('button', { name: 'Сохранить ритм' }))
+    expect(screen.getByRole('status', { name: 'Состояние приложения' })).toHaveTextContent('Ритм сохранён')
+    first.unmount()
+    renderApp()
+    fireEvent.click(screen.getByRole('link', { name: 'Проекты' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Загрузить ритм' }))
+    fireEvent.click(screen.getByRole('link', { name: 'Вернуться в студию' }))
+    expect(screen.getByLabelText('Темп BPM')).toHaveValue(138)
+    expect(screen.getByRole('button', { name: 'Kick: шаг 1' })).toHaveAttribute('aria-pressed', 'true')
+    localStorage.setItem(PROJECT_KEY, '{"bpm":0,"tracks":[]}')
+    fireEvent.click(screen.getByRole('link', { name: 'Проекты' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Загрузить ритм' }))
+    expect(screen.getByRole('status', { name: 'Состояние приложения' })).toHaveTextContent('повреждён')
+    expect(screen.getByLabelText('Темп BPM')).toHaveValue(138)
+    localStorage.clear()
+  })
+
+  test('пустой такт нельзя скачать, а ошибка экспорта показана в статусе', async () => {
+    jest.spyOn(AudioEngine.prototype, 'exportBar').mockRejectedValueOnce(new Error('offline audio unavailable'))
+    renderApp()
+    const button = screen.getByRole('button', { name: 'Скачать WAV' })
+
+    expect(button).toBeDisabled()
+    fireEvent.click(screen.getByRole('button', { name: 'Kick: шаг 1' }))
+    expect(button).toBeEnabled()
+    fireEvent.click(button)
+    await waitFor(() => expect(screen.getByRole('status', { name: 'Состояние приложения' })).toHaveTextContent('Не удалось экспортировать WAV'))
   })
 })
